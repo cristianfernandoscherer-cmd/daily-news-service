@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: daily-news-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=dynamodb,lambda,events,iam,logs
+      - DEBUG=0
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    volumes:
+      - "./.local/localstack:/var/lib/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    container_name: daily-news-migrate
+    environment:
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DYNAMODB_ENDPOINT=http://localstack:4566
+      - DYNAMODB_TABLE_NAME=articles
+    depends_on:
+      localstack:
+        condition: service_healthy
+    command: ["go", "run", ".scripts/migrate/migrate.go"]
+    profiles:
+      - tools

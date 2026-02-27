@@ -1,0 +1,24 @@
+# Binaries
+bootstrap
+*.exe
+*.out
+
+# Build artifacts
+.aws-sam/
+coverage.out
+coverage.html
+
+# Environment
+.env
+
+# Local infrastructure data
+.local/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
