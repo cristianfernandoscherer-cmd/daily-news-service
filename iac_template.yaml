@@ -17,7 +17,6 @@ Globals:
         AWS_REGION_NAME: !Ref AWS::Region
         DYNAMODB_TABLE_NAME: !Ref ArticlesTable
         DYNAMODB_ENDPOINT: !Ref DynamoDBEndpoint
-        # Use SSM for Production, otherwise use standard parameters
         BEDROCK_MODEL_ID: !If [IsProd, '{{resolve:ssm:/daily-news/prod/bedrock-model-id}}', !Ref BedrockModelId]
         LOG_LEVEL: !If [IsProd, '{{resolve:ssm:/daily-news/prod/log-level}}', !Ref LogLevel]
         TOP_N_ARTICLES: !If [IsProd, '{{resolve:ssm:/daily-news/prod/top-n-articles}}', !Ref TopNArticles]
@@ -30,9 +29,6 @@ Parameters:
     Default: dev
     AllowedValues: [dev, staging, prod]
     Description: Deployment environment
-
-Conditions:
-  IsProd: !Equals [!Ref Environment, prod]
 
   DynamoDBEndpoint:
     Type: String
@@ -58,6 +54,9 @@ Conditions:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, prod]
 
 Resources:
   # ─── DynamoDB Table ────────────────────────────────────────────────────────
@@ -143,7 +142,7 @@ Resources:
   FeedParserFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      BuildMethod: go1.x
+      BuildMethod: makefile  # Mudado de go1.x para makefile
     Properties:
       FunctionName: !Sub "daily-news-feed-parser-${Environment}"
       CodeUri: cmd/lambdas/feed-parser/
@@ -156,7 +155,7 @@ Resources:
           Properties:
             Name: !Sub "daily-news-trigger-${Environment}"
             Description: "Triggers daily news fetch at 7AM UTC"
-            ScheduleExpression: "cron(0 10 * * ? *)"  # 10 UTC = 7 AM BRT
+            ScheduleExpression: "cron(0 10 * * ? *)"
             State: ENABLED
             RetryPolicy:
               MaximumRetryAttempts: 2
@@ -173,4 +172,3 @@ Outputs:
     Value: !GetAtt FeedParserFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-FeedParserFunctionArn"
-
