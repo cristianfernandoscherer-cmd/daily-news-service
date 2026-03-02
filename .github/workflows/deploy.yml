@@ -36,21 +36,20 @@ jobs:
       - name: Set bucket name
         id: bucket
         run: |
-          # Bucket específico da política IAM
           BUCKET_NAME="daily-news-deploy-bucket-891612551514"
           echo "Bucket name: $BUCKET_NAME"
           
-          # Verificar se o bucket existe, se não, criar
-          if ! aws s3 ls "s3://$BUCKET_NAME" 2>&1 > /dev/null; then
+          # Verificar se o bucket existe
+          if aws s3 ls "s3://$BUCKET_NAME" 2>&1 > /dev/null; then
+            echo "Bucket já existe"
+          else
             echo "Bucket não existe. Criando..."
             aws s3 mb s3://$BUCKET_NAME --region us-east-1
-          else
-            echo "Bucket já existe"
           fi
           
           echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
 
-      # PASSO 2: Limpar stack problemático do SAM
+      # PASSO 2: Limpar stack problemático do SAM (se existir)
       - name: Clean up SAM managed stack
         continue-on-error: true
         run: |
@@ -59,6 +58,9 @@ jobs:
             echo "Stack encontrado. Deletando..."
             aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default
             aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default
+            echo "Stack deletado"
+          else
+            echo "Stack não existe"
           fi
 
       - name: Validate SAM template
@@ -70,22 +72,32 @@ jobs:
         run: |
           echo "Iniciando build da aplicação..."
           sam build --template iac_template.yaml
+          
+          echo "Artefatos gerados:"
+          ls -la .aws-sam/build/
 
       - name: Package SAM application
         run: |
           echo "Empacotando aplicação no bucket: ${{ steps.bucket.outputs.bucket_name }}"
           
+          # IMPORTANTE: Não usar --resolve-s3, apenas --s3-bucket
           sam package \
             --template-file .aws-sam/build/template.yaml \
             --output-template-file packaged.yaml \
             --s3-bucket ${{ steps.bucket.outputs.bucket_name }} \
-            --s3-prefix "daily-news-prod"
+            --s3-prefix "daily-news-prod" \
+            --region us-east-1
+          
+          echo "✅ Package concluído"
+          echo "Arquivo packaged.yaml gerado:"
+          ls -la packaged.yaml
 
       - name: Deploy SAM application
         id: deploy
         run: |
-          echo "Iniciando deploy..."
+          echo "Iniciando deploy com bucket: ${{ steps.bucket.outputs.bucket_name }}"
           
+          # IMPORTANTE: Sem --resolve-s3, apenas com --s3-bucket
           sam deploy \
             --template-file packaged.yaml \
             --stack-name daily-news-service-prod \
@@ -98,13 +110,16 @@ jobs:
             --region us-east-1 \
             2>&1 | tee deploy.log
           
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+          # Verificar resultado
+          DEPLOY_EXIT_CODE=${PIPESTATUS[0]}
+          
+          if [ $DEPLOY_EXIT_CODE -eq 0 ]; then
             echo "✅ Deploy concluído com sucesso"
             echo "deploy_success=true" >> $GITHUB_OUTPUT
           else
-            echo "❌ Deploy falhou"
+            echo "❌ Deploy falhou com código: $DEPLOY_EXIT_CODE"
             echo "deploy_success=false" >> $GITHUB_OUTPUT
-            exit 1
+            exit $DEPLOY_EXIT_CODE
           fi
 
       - name: Get stack outputs
@@ -127,20 +142,24 @@ jobs:
           echo "1. Status do bucket:"
           aws s3 ls s3://${{ steps.bucket.outputs.bucket_name }} || echo "Bucket não acessível"
           
+          # Verificar se o arquivo packaged.yaml existe
+          echo "2. Arquivo packaged.yaml:"
+          ls -la packaged.yaml || echo "Arquivo não encontrado"
+          
           # Verificar eventos do CloudFormation
-          echo "2. Eventos do CloudFormation:"
+          echo "3. Eventos do CloudFormation:"
           aws cloudformation describe-stack-events \
             --stack-name daily-news-service-prod \
             --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
-            --output table 2>/dev/null || echo "Stack não encontrado"
+            --output table 2>/dev/null || echo "Stack não encontrado ou sem eventos"
           
-          # Verificar permissões
-          echo "3. Testando permissões S3:"
-          aws s3api put-object \
-            --bucket ${{ steps.bucket.outputs.bucket_name }} \
-            --key test-permissions.txt \
-            --body /dev/null \
-            --content-length 0 2>&1 || echo "Sem permissão para escrever no bucket"
+          # Verificar logs do deploy
+          echo "4. Últimas linhas do deploy.log:"
+          if [ -f deploy.log ]; then
+            tail -30 deploy.log
+          else
+            echo "Arquivo deploy.log não encontrado"
+          fi
 
       - name: Upload logs
         if: always()
