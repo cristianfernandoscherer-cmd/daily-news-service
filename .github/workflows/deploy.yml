@@ -45,15 +45,25 @@ jobs:
           echo "Bucket name: $BUCKET_NAME"
           echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
 
-      - name: Clean up SAM managed stack
+      - name: Clean up stacks in ROLLBACK_COMPLETE
         continue-on-error: true
         run: |
-          echo "Verificando stack de gerenciamento do SAM..."
-          if aws cloudformation describe-stacks --stack-name aws-sam-cli-managed-default 2>/dev/null; then
-            echo "Deletando stack corrompido..."
-            aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default
-            aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default
-          fi
+          echo "Verificando stacks corrompidos..."
+          
+          # Lista de stacks para validar
+          STACKS=("aws-sam-cli-managed-default" "daily-news-service-prod")
+          
+          for STACK in "${STACKS[@]}"; do
+            STATUS=$(aws cloudformation describe-stacks --stack-name $STACK --region us-east-1 --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "NOT_FOUND")
+            echo "Stack: $STACK, Status: $STATUS"
+            
+            if [ "$STATUS" == "ROLLBACK_COMPLETE" ]; then
+              echo "🗑️ Deletando stack $STACK pois está em ROLLBACK_COMPLETE..."
+              aws cloudformation delete-stack --stack-name $STACK --region us-east-1
+              aws cloudformation wait stack-delete-complete --stack-name $STACK --region us-east-1
+              echo "✅ Stack $STACK deletado."
+            fi
+          done
 
       - name: Build SAM application
         run: |
