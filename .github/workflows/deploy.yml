@@ -32,78 +32,66 @@ jobs:
           echo "Verificando credenciais AWS..."
           aws sts get-caller-identity
 
-      # PASSO 1: Deletar o stack problemático (se existir)
-      - name: Clean up problematic SAM managed stack
+      # PASSO 1: Usar o bucket específico da política
+      - name: Set bucket name
+        id: bucket
+        run: |
+          # Bucket específico da política IAM
+          BUCKET_NAME="daily-news-deploy-bucket-891612551514"
+          echo "Bucket name: $BUCKET_NAME"
+          
+          # Verificar se o bucket existe, se não, criar
+          if ! aws s3 ls "s3://$BUCKET_NAME" 2>&1 > /dev/null; then
+            echo "Bucket não existe. Criando..."
+            aws s3 mb s3://$BUCKET_NAME --region us-east-1
+          else
+            echo "Bucket já existe"
+          fi
+          
+          echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+
+      # PASSO 2: Limpar stack problemático do SAM
+      - name: Clean up SAM managed stack
         continue-on-error: true
         run: |
           echo "Verificando stack aws-sam-cli-managed-default..."
           if aws cloudformation describe-stacks --stack-name aws-sam-cli-managed-default 2>/dev/null; then
             echo "Stack encontrado. Deletando..."
             aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default
-            echo "Aguardando deleção..."
             aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default
-            echo "Stack deletado com sucesso."
-          else
-            echo "Stack não existe, prosseguindo..."
           fi
 
-      # PASSO 2: Criar um bucket S3 dedicado (único)
-      - name: Create dedicated S3 bucket
-        id: create-bucket
-        run: |
-          # Gerar nome único para o bucket
-          BUCKET_NAME="daily-news-sam-deploy-$(date +%Y%m%d-%H%M%S)-${{ github.run_id }}"
-          echo "Bucket name: $BUCKET_NAME"
-          
-          # Criar bucket
-          if ! aws s3 ls "s3://$BUCKET_NAME" 2>&1 > /dev/null; then
-            echo "Criando bucket S3: $BUCKET_NAME"
-            aws s3 mb s3://$BUCKET_NAME --region us-east-1
-          fi
-          
-          # Salvar nome do bucket para próximos passos
-          echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
-
-      # PASSO 3: Validar template
       - name: Validate SAM template
         run: |
           echo "Validando template SAM..."
           sam validate --template iac_template.yaml
 
-      # PASSO 4: Build da aplicação
       - name: Build SAM application
         run: |
           echo "Iniciando build da aplicação..."
           sam build --template iac_template.yaml
 
-      # PASSO 5: Package usando bucket específico (NÃO usar --resolve-s3)
       - name: Package SAM application
-        id: package
         run: |
-          echo "Empacotando aplicação no bucket: ${{ steps.create-bucket.outputs.bucket_name }}"
+          echo "Empacotando aplicação no bucket: ${{ steps.bucket.outputs.bucket_name }}"
           
-          # Fazer package com bucket específico
           sam package \
             --template-file .aws-sam/build/template.yaml \
             --output-template-file packaged.yaml \
-            --s3-bucket ${{ steps.create-bucket.outputs.bucket_name }} \
+            --s3-bucket ${{ steps.bucket.outputs.bucket_name }} \
             --s3-prefix "daily-news-prod"
-          
-          echo "✅ Package concluído"
 
-      # PASSO 6: Deploy
       - name: Deploy SAM application
         id: deploy
         run: |
           echo "Iniciando deploy..."
           
-          # Tentar deploy
           sam deploy \
             --template-file packaged.yaml \
             --stack-name daily-news-service-prod \
             --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
             --parameter-overrides Environment=prod \
-            --s3-bucket ${{ steps.create-bucket.outputs.bucket_name }} \
+            --s3-bucket ${{ steps.bucket.outputs.bucket_name }} \
             --s3-prefix "daily-news-prod" \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
@@ -119,7 +107,6 @@ jobs:
             exit 1
           fi
 
-      # PASSO 7: Obter outputs
       - name: Get stack outputs
         if: steps.deploy.outputs.deploy_success == 'true'
         run: |
@@ -129,30 +116,33 @@ jobs:
             --query 'Stacks[0].Outputs' \
             --output table
 
-      # PASSO 8: Diagnóstico em caso de falha
-      - name: Diagnose deployment failure
+      - name: Diagnose on failure
         if: failure()
         run: |
           echo "========================================="
           echo "🔍 DIAGNÓSTICO DE ERRO"
           echo "========================================="
           
+          # Verificar bucket
+          echo "1. Status do bucket:"
+          aws s3 ls s3://${{ steps.bucket.outputs.bucket_name }} || echo "Bucket não acessível"
+          
           # Verificar eventos do CloudFormation
-          echo "Eventos do CloudFormation:"
+          echo "2. Eventos do CloudFormation:"
           aws cloudformation describe-stack-events \
             --stack-name daily-news-service-prod \
             --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
             --output table 2>/dev/null || echo "Stack não encontrado"
           
-          # Mostrar logs do deploy
-          echo ""
-          echo "Últimas linhas do deploy.log:"
-          if [ -f deploy.log ]; then
-            tail -50 deploy.log
-          fi
+          # Verificar permissões
+          echo "3. Testando permissões S3:"
+          aws s3api put-object \
+            --bucket ${{ steps.bucket.outputs.bucket_name }} \
+            --key test-permissions.txt \
+            --body /dev/null \
+            --content-length 0 2>&1 || echo "Sem permissão para escrever no bucket"
 
-      # PASSO 9: Upload de logs (sempre)
-      - name: Upload deployment logs
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
