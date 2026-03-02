@@ -2,7 +2,6 @@ version = 0.1
 
 [default.deploy.parameters]
 stack_name = "daily-news-service-dev"
-resolve_s3 = true
 s3_prefix = "daily-news-service"
 region = "us-east-1"
 confirm_changeset = true
@@ -11,7 +10,6 @@ parameter_overrides = "Environment=dev LogLevel=debug UseMockLLM=true"
 
 [prod.deploy.parameters]
 stack_name = "daily-news-service-prod"
-resolve_s3 = true
 s3_prefix = "daily-news-service"
 region = "us-east-1"
 confirm_changeset = true
