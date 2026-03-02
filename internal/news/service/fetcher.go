@@ -18,17 +18,17 @@ type feedConfig struct {
 
 var defaultFeeds = []feedConfig{
 	{Source: models.SourceDevTo, URL: "https://dev.to/feed"},
-	{Source: models.SourceAWSBlog, URL: "https://aws.amazon.com/blogs/aws/feed/"},
-	{Source: models.SourceTechCrunch, URL: "https://techcrunch.com/feed/"},
-	{Source: models.SourceTheVerge, URL: "https://www.theverge.com/rss/index.xml"},
-	{Source: models.SourceWired, URL: "https://www.wired.com/feed/rss"},
-	{Source: models.SourceArsTechnica, URL: "https://arstechnica.com/feed/"},
-	{Source: models.SourceCNET, URL: "https://www.cnet.com/rss/news/"},
-	{Source: models.SourceZDNet, URL: "https://www.zdnet.com/news/rss.xml"},
-	{Source: models.SourceVentureBeat, URL: "https://venturebeat.com/feed/"},
-	{Source: models.SourceEngadget, URL: "https://www.engadget.com/rss.xml"},
-	{Source: models.SourceMITReview, URL: "https://www.technologyreview.com/feed/"},
-	{Source: models.SourceHackerNews, URL: "https://news.ycombinator.com/rss"},
+	//{Source: models.SourceAWSBlog, URL: "https://aws.amazon.com/blogs/aws/feed/"},
+	// {Source: models.SourceTechCrunch, URL: "https://techcrunch.com/feed/"},
+	// {Source: models.SourceTheVerge, URL: "https://www.theverge.com/rss/index.xml"},
+	// {Source: models.SourceWired, URL: "https://www.wired.com/feed/rss"},
+	// {Source: models.SourceArsTechnica, URL: "https://arstechnica.com/feed/"},
+	// {Source: models.SourceCNET, URL: "https://www.cnet.com/rss/news/"},
+	// {Source: models.SourceZDNet, URL: "https://www.zdnet.com/news/rss.xml"},
+	// {Source: models.SourceVentureBeat, URL: "https://venturebeat.com/feed/"},
+	// {Source: models.SourceEngadget, URL: "https://www.engadget.com/rss.xml"},
+	// {Source: models.SourceMITReview, URL: "https://www.technologyreview.com/feed/"},
+	// {Source: models.SourceHackerNews, URL: "https://news.ycombinator.com/rss"},
 }
 
 type FetcherService struct {
