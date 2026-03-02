@@ -57,8 +57,8 @@ jobs:
             STATUS=$(aws cloudformation describe-stacks --stack-name $STACK --region us-east-1 --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "NOT_FOUND")
             echo "Stack: $STACK, Status: $STATUS"
             
-            if [ "$STATUS" == "ROLLBACK_COMPLETE" ]; then
-              echo "🗑️ Deletando stack $STACK pois está em ROLLBACK_COMPLETE..."
+            if [ "$STATUS" == "ROLLBACK_COMPLETE" ] || [ "$STATUS" == "ROLLBACK_FAILED" ]; then
+              echo "🗑️ Deletando stack $STACK pois está em $STATUS..."
               aws cloudformation delete-stack --stack-name $STACK --region us-east-1
               aws cloudformation wait stack-delete-complete --stack-name $STACK --region us-east-1
               echo "✅ Stack $STACK deletado."
