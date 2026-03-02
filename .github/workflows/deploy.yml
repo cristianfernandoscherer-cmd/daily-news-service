@@ -32,26 +32,36 @@ jobs:
           echo "Verificando credenciais AWS..."
           aws sts get-caller-identity
 
-      # Criar Makefile para build se não existir
+      # Verificar estrutura do projeto
+      - name: Check project structure
+        run: |
+          echo "Estrutura do projeto:"
+          find cmd -type f -name "*.go" | sort
+          echo ""
+          echo "Arquivos na pasta feed-parser:"
+          ls -la cmd/lambdas/feed-parser/
+
+      # Criar Makefile com a formatação correta (usando TAB, não espaços)
       - name: Create Makefile for Go build
         run: |
-          if [ ! -f cmd/lambdas/feed-parser/Makefile ]; then
-            echo "Criando Makefile para feed-parser..."
-            cat > cmd/lambdas/feed-parser/Makefile << 'EOF'
-          build-FeedParserFunction:
-            GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bootstrap main.go
-            cp bootstrap \$(ARTIFACTS_DIR)/
-          EOF
-          fi
-
-      # Verificar se o main.go existe
-      - name: Check Go files
-        run: |
-          ls -la cmd/lambdas/feed-parser/
+          MAKEFILE_PATH="cmd/lambdas/feed-parser/Makefile"
+          
+          echo "Criando Makefile em $MAKEFILE_PATH..."
+          
+          # Usar printf para garantir tabs
+          printf 'build-FeedParserFunction:\n\tGOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bootstrap ./...\n\tcp bootstrap $(ARTIFACTS_DIR)/\n' > $MAKEFILE_PATH
+          
+          echo "Makefile criado. Conteúdo:"
+          cat -A $MAKEFILE_PATH  # Mostra caracteres especiais incluindo tabs
+          
+          echo ""
+          echo "Verificando se o main.go existe:"
           if [ -f cmd/lambdas/feed-parser/main.go ]; then
-            echo "main.go encontrado"
+            echo "✅ main.go encontrado"
           else
-            echo "ERRO: main.go não encontrado!"
+            echo "❌ main.go NÃO encontrado!"
+            echo "Procurando arquivos .go:"
+            find cmd -name "*.go"
             exit 1
           fi
 
@@ -72,11 +82,13 @@ jobs:
             aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default
           fi
 
+      # Build com SAM
       - name: Build SAM application
         run: |
           echo "Build da aplicação..."
           sam build --template iac_template.yaml --use-container
 
+      # Deploy com SAM
       - name: Deploy SAM application
         run: |
           echo "Deploy da aplicação..."
