@@ -68,7 +68,7 @@ jobs:
             --stack-name daily-news-service-prod \
             --s3-bucket ${{ steps.bucket.outputs.bucket_name }} \
             --s3-prefix daily-news-prod \
-            --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
             --parameter-overrides Environment=prod \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
