@@ -145,7 +145,7 @@ Resources:
       BuildMethod: makefile  # Mudado de go1.x para makefile
     Properties:
       FunctionName: !Sub "daily-news-feed-parser-${Environment}"
-      CodeUri: cmd/lambdas/feed-parser/
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt LambdaExecutionRole.Arn
       Description: "Fetches, summarizes, and ranks daily tech news"

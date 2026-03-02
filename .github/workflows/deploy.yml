@@ -32,38 +32,11 @@ jobs:
           echo "Verificando credenciais AWS..."
           aws sts get-caller-identity
 
-      # Verificar estrutura do projeto
-      - name: Check project structure
+      - name: Verify project structure
         run: |
-          echo "Estrutura do projeto:"
-          find cmd -type f -name "*.go" | sort
-          echo ""
-          echo "Arquivos na pasta feed-parser:"
+          echo "Verificando arquivos principais..."
+          ls -la go.mod Makefile iac_template.yaml
           ls -la cmd/lambdas/feed-parser/
-
-      # Criar Makefile com a formatação correta (usando TAB, não espaços)
-      - name: Create Makefile for Go build
-        run: |
-          MAKEFILE_PATH="cmd/lambdas/feed-parser/Makefile"
-          
-          echo "Criando Makefile em $MAKEFILE_PATH..."
-          
-          # Usar printf para garantir tabs
-          printf 'build-FeedParserFunction:\n\tGOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bootstrap ./...\n\tcp bootstrap $(ARTIFACTS_DIR)/\n' > $MAKEFILE_PATH
-          
-          echo "Makefile criado. Conteúdo:"
-          cat -A $MAKEFILE_PATH  # Mostra caracteres especiais incluindo tabs
-          
-          echo ""
-          echo "Verificando se o main.go existe:"
-          if [ -f cmd/lambdas/feed-parser/main.go ]; then
-            echo "✅ main.go encontrado"
-          else
-            echo "❌ main.go NÃO encontrado!"
-            echo "Procurando arquivos .go:"
-            find cmd -name "*.go"
-            exit 1
-          fi
 
       - name: Set bucket name
         id: bucket
@@ -75,23 +48,22 @@ jobs:
       - name: Clean up SAM managed stack
         continue-on-error: true
         run: |
-          echo "Verificando stack aws-sam-cli-managed-default..."
+          echo "Verificando stack de gerenciamento do SAM..."
           if aws cloudformation describe-stacks --stack-name aws-sam-cli-managed-default 2>/dev/null; then
-            echo "Deletando stack..."
+            echo "Deletando stack corrompido..."
             aws cloudformation delete-stack --stack-name aws-sam-cli-managed-default
             aws cloudformation wait stack-delete-complete --stack-name aws-sam-cli-managed-default
           fi
 
-      # Build com SAM
       - name: Build SAM application
         run: |
-          echo "Build da aplicação..."
+          echo "Iniciando build (usando root Makefile)..."
           sam build --template iac_template.yaml --use-container
 
-      # Deploy com SAM
       - name: Deploy SAM application
+        id: deploy
         run: |
-          echo "Deploy da aplicação..."
+          echo "Iniciando deploy..."
           sam deploy \
             --stack-name daily-news-service-prod \
             --s3-bucket ${{ steps.bucket.outputs.bucket_name }} \
@@ -101,3 +73,14 @@ jobs:
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --region us-east-1
+
+      - name: Final status
+        if: always()
+        run: |
+          if [ "${{ steps.deploy.conclusion }}" == "success" ]; then
+            echo "✅ DEPLOY CONCLUÍDO COM SUCESSO"
+            exit 0
+          else
+            echo "❌ DEPLOY FALHOU"
+            exit 1
+          fi
