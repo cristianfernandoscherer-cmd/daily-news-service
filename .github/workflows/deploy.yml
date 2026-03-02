@@ -27,11 +27,183 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Build and Deploy
+      - name: Verify AWS credentials
         run: |
-          sam build --template iac_template.yaml
-          sam deploy --no-confirm-changeset \
-                     --no-fail-on-empty-changeset \
-                     --stack-name daily-news-service-prod \
-                     --capabilities CAPABILITY_IAM \
-                     --parameter-overrides Environment=prod
+          echo "Verificando credenciais AWS..."
+          aws sts get-caller-identity
+          echo "Região configurada: us-east-1"
+
+      - name: Check if stack exists
+        id: check-stack
+        continue-on-error: true
+        run: |
+          echo "Verificando se o stack já existe..."
+          if aws cloudformation describe-stacks --stack-name daily-news-service-prod; then
+            echo "stack_exists=true" >> $GITHUB_OUTPUT
+            echo "Stack já existe"
+          else
+            echo "stack_exists=false" >> $GITHUB_OUTPUT
+            echo "Stack não existe ainda"
+          fi
+
+      - name: Validate SAM template
+        run: |
+          echo "Validando template SAM..."
+          sam validate --template iac_template.yaml
+          if [ $? -eq 0 ]; then
+            echo "✅ Template válido"
+          else
+            echo "❌ Template inválido"
+            exit 1
+          fi
+
+      - name: Build SAM application
+        run: |
+          echo "Iniciando build da aplicação..."
+          sam build --template iac_template.yaml --debug
+          echo "✅ Build concluído"
+
+      - name: List build artifacts
+        run: |
+          echo "Artefatos gerados:"
+          ls -la .aws-sam/build/
+          echo "Template gerado:"
+          cat .aws-sam/build/template.yaml | head -20
+
+      - name: Package SAM application
+        run: |
+          echo "Empacotando aplicação..."
+          sam package \
+            --output-template-file packaged.yaml \
+            --resolve-s3
+          echo "✅ Package concluído"
+
+      - name: Deploy SAM application
+        id: deploy
+        continue-on-error: true
+        run: |
+          echo "Iniciando deploy..."
+          echo "Stack name: daily-news-service-prod"
+          echo "Environment: prod"
+          
+          sam deploy \
+            --template-file packaged.yaml \
+            --stack-name daily-news-service-prod \
+            --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
+            --parameter-overrides Environment=prod \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --debug 2>&1 | tee deploy.log
+          
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "✅ Deploy concluído com sucesso"
+            echo "deploy_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Deploy falhou"
+            echo "deploy_success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get stack outputs (if successful)
+        if: steps.deploy.outputs.deploy_success == 'true'
+        run: |
+          echo "Obtendo outputs do stack..."
+          aws cloudformation describe-stacks \
+            --stack-name daily-news-service-prod \
+            --query 'Stacks[0].Outputs' \
+            --output table
+
+      - name: Diagnose deployment failure
+        if: steps.deploy.outputs.deploy_success == 'false'
+        run: |
+          echo "========================================="
+          echo "🔍 DIAGNÓSTICO DE ERRO - INÍCIO"
+          echo "========================================="
+          
+          echo "1️⃣ Verificando eventos do CloudFormation:"
+          aws cloudformation describe-stack-events \
+            --stack-name daily-news-service-prod \
+            --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || ResourceStatus==`ROLLBACK_IN_PROGRESS` || ResourceStatus==`ROLLBACK_COMPLETE`].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+            --max-items 10 \
+            --output table || echo "   Sem eventos ou stack não encontrado"
+          
+          echo ""
+          echo "2️⃣ Verificando logs do deploy:"
+          if [ -f deploy.log ]; then
+            echo "   Últimas 50 linhas do deploy.log:"
+            tail -50 deploy.log
+          else
+            echo "   Arquivo deploy.log não encontrado"
+          fi
+          
+          echo ""
+          echo "3️⃣ Verificando se o stack está em estado de rollback:"
+          aws cloudformation describe-stacks \
+            --stack-name daily-news-service-prod \
+            --query 'Stacks[0].[StackName,StackStatus,StackStatusReason]' \
+            --output text 2>/dev/null || echo "   Stack não encontrado"
+          
+          echo ""
+          echo "4️⃣ Listando recursos do stack em falha:"
+          aws cloudformation list-stack-resources \
+            --stack-name daily-news-service-prod \
+            --query 'StackResourceSummaries[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceType,ResourceStatus]' \
+            --output table 2>/dev/null || echo "   Nenhum recurso em falha encontrado"
+          
+          echo ""
+          echo "5️⃣ Verificando quotas e limites:"
+          aws service-quotas get-service-quota \
+            --service-code lambda \
+            --quota-code L-B99A9384 2>/dev/null || echo "   Não foi possível verificar quotas"
+          
+          echo ""
+          echo "6️⃣ Verificando buckets S3 criados pelo SAM:"
+          aws s3 ls | grep -i "sam\|daily-news" || echo "   Nenhum bucket SAM encontrado"
+          
+          echo ""
+          echo "========================================="
+          echo "🔍 DIAGNÓSTICO DE ERRO - FIM"
+          echo "========================================="
+          
+          # Tentar obter mais detalhes do erro
+          if aws cloudformation describe-stacks --stack-name daily-news-service-prod 2>/dev/null; then
+            echo ""
+            echo "📋 Detalhes completos do stack:"
+            aws cloudformation describe-stacks \
+              --stack-name daily-news-service-prod \
+              --output json
+          fi
+
+      - name: Cleanup on failure (optional)
+        if: steps.deploy.outputs.deploy_success == 'false'
+        run: |
+          echo "⚠️ Deploy falhou. Deseja fazer cleanup do stack?"
+          echo "Para fazer cleanup manualmente, execute:"
+          echo "aws cloudformation delete-stack --stack-name daily-news-service-prod"
+          # Descomente a linha abaixo se quiser cleanup automático
+          # aws cloudformation delete-stack --stack-name daily-news-service-prod || true
+
+      - name: Upload deployment logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-logs
+          path: |
+            deploy.log
+            .aws-sam/build/template.yaml
+            packaged.yaml
+          retention-days: 7
+
+      - name: Final status
+        if: always()
+        run: |
+          echo "========================================="
+          echo "🏁 STATUS FINAL DO DEPLOY"
+          echo "========================================="
+          if [ "${{ steps.deploy.outputs.deploy_success }}" == "true" ]; then
+            echo "✅ DEPLOY CONCLUÍDO COM SUCESSO"
+            exit 0
+          else
+            echo "❌ DEPLOY FALHOU"
+            echo "Verifique os logs de diagnóstico acima para mais detalhes"
+            exit 1
+          fi
