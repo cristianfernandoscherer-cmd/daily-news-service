@@ -2,12 +2,12 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
 type BedrockClient struct {
@@ -25,56 +25,40 @@ func NewBedrockClient(ctx context.Context, region, modelID string) (*BedrockClie
 	return &BedrockClient{client: client, modelID: modelID}, nil
 }
 
-type claudeRequest struct {
-	AnthropicVersion string          `json:"anthropic_version"`
-	MaxTokens        int             `json:"max_tokens"`
-	Messages         []claudeMessage `json:"messages"`
-}
-
-type claudeMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type claudeResponse struct {
-	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
-}
-
 func (b *BedrockClient) ResumeArticle(ctx context.Context, prompt string) (string, error) {
-	reqBody := claudeRequest{
-		AnthropicVersion: "bedrock-2023-05-31",
-		MaxTokens:        1024,
-		Messages: []claudeMessage{
-			{Role: "user", Content: prompt},
+	input := &bedrockruntime.ConverseInput{
+		ModelId: aws.String(b.modelID),
+		Messages: []types.Message{
+			{
+				Role: types.ConversationRoleUser,
+				Content: []types.ContentBlock{
+					&types.ContentBlockMemberText{Value: prompt},
+				},
+			},
+		},
+		InferenceConfig: &types.InferenceConfiguration{
+			MaxTokens: aws.Int32(2048),
 		},
 	}
 
-	body, err := json.Marshal(reqBody)
+	resp, err := b.client.Converse(ctx, input)
 	if err != nil {
-		return "", fmt.Errorf("marshalling Bedrock request: %w", err)
+		return "", fmt.Errorf("invoking Bedrock model %q via Converse: %w", b.modelID, err)
 	}
 
-	resp, err := b.client.InvokeModel(ctx, &bedrockruntime.InvokeModelInput{
-		ModelId:     aws.String(b.modelID),
-		ContentType: aws.String("application/json"),
-		Accept:      aws.String("application/json"),
-		Body:        body,
-	})
-	if err != nil {
-		return "", fmt.Errorf("invoking Bedrock model %q: %w", b.modelID, err)
+	output, ok := resp.Output.(*types.ConverseOutputMemberMessage)
+	if !ok {
+		return "", fmt.Errorf("unexpected output type from Bedrock: %T", resp.Output)
 	}
 
-	var claudeResp claudeResponse
-	if err := json.Unmarshal(resp.Body, &claudeResp); err != nil {
-		return "", fmt.Errorf("parsing Bedrock response: %w", err)
-	}
-
-	if len(claudeResp.Content) == 0 {
+	if len(output.Value.Content) == 0 {
 		return "", fmt.Errorf("empty response from Bedrock model")
 	}
 
-	return claudeResp.Content[0].Text, nil
+	textOutput, ok := output.Value.Content[0].(*types.ContentBlockMemberText)
+	if !ok {
+		return "", fmt.Errorf("unexpected content block type: %T", output.Value.Content[0])
+	}
+
+	return textOutput.Value, nil
 }
