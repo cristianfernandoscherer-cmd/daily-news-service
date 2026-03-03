@@ -34,7 +34,7 @@ func NewUpdateNewsHandler(
 }
 
 func (h *UpdateNewsHandler) Handle(ctx context.Context) error {
-	h.logger.Info("starting daily news update")
+	h.logger.Info("starting daily news update.")
 
 	articles, err := h.fetcher.Fetch(ctx)
 	if err != nil {
